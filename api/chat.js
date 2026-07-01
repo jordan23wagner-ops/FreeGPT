@@ -361,11 +361,17 @@ const STYLE_PROMPTS = {
 // info, then append a clickable Sources list to the reply.
 
 async function runWebSearch(query, key) {
+  // Bias toward the current year so "most recent X" questions surface this year's
+  // pages instead of an older page that just happens to rank well (the failure mode
+  // we saw live: the model picked a 2024 Super Bowl page over a newer 2025 result
+  // already sitting in its own result set). Skipped if the query already names a year.
+  const year = new Date().getFullYear()
+  const searchQuery = /\b(19|20)\d{2}\b/.test(query) ? query : `${query} ${year}`
   const response = await fetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      query: String(query).slice(0, 400),
+      query: String(searchQuery).slice(0, 400),
       max_results: 5,
       include_answer: true,
       // 'advanced' does deeper content extraction than 'basic' — costs more Tavily
@@ -395,9 +401,12 @@ function buildSearchSystem(query, search) {
       `Today's date is ${today}. The web search results below are more current than your ` +
       `training data — for anything time-sensitive (scores, prices, releases, schedules, ` +
       `"latest"/"current"/"most recent" anything), trust these results over what you already ` +
-      `"know", even if it contradicts your training. Answer using them, cite inline like [1], ` +
-      `[2] (plain brackets — never a "【...】" style citation), and be concise. If the results ` +
-      `don't cover the question, or conflict with each other, say so plainly instead of ` +
+      `"know", even if it contradicts your training. Some results may be older than others — ` +
+      `check each one for its own date/event and, for "most recent" style questions, go with ` +
+      `whichever result describes the most recent actual event, not just the first or most ` +
+      `confident-sounding one. Answer using them, cite inline like [1], [2] (plain brackets — ` +
+      `never a "【...】" style citation), and be concise. If the results don't cover the ` +
+      `question, or genuinely conflict on which is more recent, say so plainly instead of ` +
       `guessing.\n\nQuery: ${query}\n\n` +
       (search.answer ? `Quick summary: ${search.answer}\n\n` : '') +
       `Results:\n${lines}`,
