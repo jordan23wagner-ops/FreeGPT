@@ -1,0 +1,42 @@
+{
+  "name": "FreeGPT — Free AI Chat",
+  "short_name": "FreeGPT",
+  "description": "Free, no-signup AI chat — multiple models, images, voice, and documents.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "theme_color": "#3b82f6",
+  "background_color": "#ffffff",
+  "icons": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 192 192'><rect fill='%233b82f6' width='192' height='192'/><text x='50%' y='50%' text-anchor='middle' dy='.3em' fill='white' font-size='100' font-weight='bold' font-family='system-ui'>F</text></svg>",
+      "sizes": "192x192",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'><rect fill='%233b82f6' width='512' height='512'/><text x='50%' y='50%' text-anchor='middle' dy='.3em' fill='white' font-size='280' font-weight='bold' font-family='system-ui'>F</text></svg>",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "screenshots": [
+    {
+      "src": "data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 540 720'><rect fill='%23f3f4f6' width='540' height='720'/></svg>",
+      "sizes": "540x720",
+      "form_factor": "narrow"
+    }
+  ],
+  "categories": ["productivity"],
+  "shortcuts": [
+    {
+      "name": "New chat",
+      "short_name": "Chat",
+      "description": "Start a new conversation",
+      "url": "/?action=new",
+      "icons": []
+    }
+  ]
+}

@@ -1,0 +1,112 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body, #root {
+  width: 100%;
+  height: 100%;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+/* ---- Themes ----
+   Semantic CSS variables; each theme overrides them. Text colors are chosen for
+   strong contrast against their backgrounds so copy is never washed out. */
+
+:root, [data-theme="light"] {
+  --bg: #ffffff;
+  --surface: #f9fafb;
+  --surface-2: #e5e7eb;
+  --text: #111827;
+  --muted: #6b7280;
+  --border: #e5e7eb;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-text: #ffffff;
+  --user-bubble: #3b82f6;
+  --user-text: #ffffff;
+  --assistant-bubble: #f3f4f6;
+  --assistant-text: #111827;
+  --input-bg: #ffffff;
+}
+
+[data-theme="dark"] {
+  --bg: #111827;
+  --surface: #1f2937;
+  --surface-2: #374151;
+  --text: #f3f4f6;
+  --muted: #9ca3af;
+  --border: #374151;
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --accent-text: #ffffff;
+  --user-bubble: #2563eb;
+  --user-text: #ffffff;
+  --assistant-bubble: #1f2937;
+  --assistant-text: #f3f4f6;
+  --input-bg: #374151;
+}
+
+/* Matte Yellow — warm pale yellow surfaces, dark brown text for contrast */
+[data-theme="yellow"] {
+  --bg: #f4ecd2;
+  --surface: #ece0bd;
+  --surface-2: #e0d0a3;
+  --text: #3a3320;
+  --muted: #6e6244;
+  --border: #d6c391;
+  --accent: #be8a1e;
+  --accent-hover: #a0741a;
+  --accent-text: #ffffff;
+  --user-bubble: #8a6a2c;
+  --user-text: #fff8e7;
+  --assistant-bubble: #e7dab4;
+  --assistant-text: #3a3320;
+  --input-bg: #faf4e2;
+}
+
+/* Ocean — deep blue dark theme */
+[data-theme="ocean"] {
+  --bg: #0e1a2b;
+  --surface: #16273d;
+  --surface-2: #22384f;
+  --text: #e5eef7;
+  --muted: #8fa6bd;
+  --border: #284a66;
+  --accent: #2da8e0;
+  --accent-hover: #1f8cbf;
+  --accent-text: #ffffff;
+  --user-bubble: #1f7fb8;
+  --user-text: #ffffff;
+  --assistant-bubble: #16273d;
+  --assistant-text: #e5eef7;
+  --input-bg: #22384f;
+}
+
+/* Rose — soft warm pink light theme */
+[data-theme="rose"] {
+  --bg: #fdf3f5;
+  --surface: #fbe6ea;
+  --surface-2: #f6d3db;
+  --text: #4a2630;
+  --muted: #8a5563;
+  --border: #f0c2cd;
+  --accent: #d6336c;
+  --accent-hover: #b82a5b;
+  --accent-text: #ffffff;
+  --user-bubble: #d6336c;
+  --user-text: #ffffff;
+  --assistant-bubble: #f8dee5;
+  --assistant-text: #4a2630;
+  --input-bg: #ffffff;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+}
