@@ -56,29 +56,26 @@ export default async function handler(req, res) {
     // NIM fallback is text-only (images are stripped), so gemma's backstop is just a
     // reliable text model. The NIM gemma deployments 404/time-out; llama-3.3 is steady.
     gemma:    { ollama: 'gemma4:31b',              nim: 'meta/llama-3.3-70b-instruct',   order: ['ollama', 'nim'] },
-    // Smarter free Ollama Cloud models (no vision). gpt-oss is a fast MoE with strong
-    // reasoning + reliable tool-calling; qwen3-coder is tuned for code. llama-3.3 is the
-    // text-only NIM backstop for both.
-    gptoss:   { ollama: 'gpt-oss:120b',            nim: 'meta/llama-3.3-70b-instruct',   order: ['ollama', 'nim'] },
-    qwen:     { ollama: 'qwen3-coder:480b',        nim: 'meta/llama-3.3-70b-instruct',   order: ['ollama', 'nim'] }
+    // Smarter free Ollama Cloud model (no vision). gpt-oss is a fast MoE with strong
+    // reasoning + reliable tool-calling. llama-3.3 is the text-only NIM backstop.
+    gptoss:   { ollama: 'gpt-oss:120b',            nim: 'meta/llama-3.3-70b-instruct',   order: ['ollama', 'nim'] }
     // Evaluated glm-5 and deepseek-v3.1:671b — neither tag resolves on the free tier
     // (both fall back to NIM) and DeepSeek is slow. gpt-oss:120b stays the smart pick.
   }
 
   // Resolve the effective model.
-  //  - 'auto' routes by intent: Qwen3-Coder for code, GPT-OSS for everything else,
-  //    and Gemma whenever vision or image generation is involved (the others are
-  //    text-only and can't see uploads or drive the generate_image tool).
+  //  - 'auto' routes to GPT-OSS for text, and Gemma whenever vision or image generation
+  //    is involved (GPT-OSS is text-only and can't see uploads or drive the generate_image
+  //    tool).
   //  - Image requests / photo uploads ALWAYS route to Gemma, even under a manual
   //    non-Gemma selection, so "draw me X" and "what's in this photo?" just work.
   const wantsImage = isImageRequest(newMessage)
   const hasVisionInput = imageList.length > 0
   let effectiveModel = model
   if (model === 'auto') {
-    if (wantsImage || hasVisionInput) effectiveModel = 'gemma'
-    else effectiveModel = classifyQuery(newMessage)
+    effectiveModel = (wantsImage || hasVisionInput) ? 'gemma' : 'gptoss'
   } else if ((wantsImage || hasVisionInput) && model !== 'gemma' && model !== 'm3') {
-    // Manual GPT-OSS / Qwen can't see images or generate them — fall to Gemma.
+    // Manual GPT-OSS can't see images or generate them — fall to Gemma.
     effectiveModel = 'gemma'
   } else if (wantsImage && model === 'm3') {
     effectiveModel = 'gemma'
@@ -280,17 +277,6 @@ const EDIT_INTENT_RE =
 
 function isEditRequest(text) {
   return typeof text === 'string' && EDIT_INTENT_RE.test(text)
-}
-
-// Auto routing for text queries: coding-flavored prompts go to Qwen3-Coder; everything
-// else goes to GPT-OSS 120B, the smartest fast generalist. (Vision/image requests are
-// handled earlier and never reach here.)
-const CODING_RE =
-  /\b(code|coding|program|programming|function|debug|bug|stack trace|algorithm|regex|sql|python|javascript|typescript|java|c\+\+|c#|rust|golang|\bgo\b|php|ruby|swift|kotlin|html|css|react|vue|node|api|json|yaml|docker|kubernetes|compile|refactor|syntax error|terminal|command line|\bgit\b|leetcode)\b/i
-
-function classifyQuery(text) {
-  if (typeof text !== 'string') return 'gptoss'
-  return CODING_RE.test(text) ? 'qwen' : 'gptoss'
 }
 
 // Response-style guidance, injected as a system message so the user controls verbosity

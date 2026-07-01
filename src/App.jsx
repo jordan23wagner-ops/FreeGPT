@@ -37,7 +37,7 @@ import { syncConversationsDown, syncConversationUp, syncDeleteConversation } fro
 const TOP_INSET = 'calc(env(safe-area-inset-top, 0px) + 0.75rem)'
 const BOTTOM_INSET = 'calc(env(safe-area-inset-bottom, 0px) + 1rem)'
 
-const MODEL_LABELS = { auto: 'Auto', m3: 'MiniMax M3', gemma: 'Gemma 4', gptoss: 'GPT-OSS 120B', qwen: 'Qwen3 Coder' }
+const MODEL_LABELS = { auto: 'Auto', m3: 'MiniMax M3', gemma: 'Gemma 4', gptoss: 'GPT-OSS 120B' }
 
 export default function App() {
   // Load conversations once and derive the active id from the SAME instance — a fresh
@@ -1001,7 +1001,6 @@ export default function App() {
               <option value="m3">MiniMax M3 — vision</option>
               <option value="gemma">Gemma 4 — vision + images</option>
               <option value="gptoss">GPT-OSS 120B — smartest</option>
-              <option value="qwen">Qwen3 Coder — coding</option>
             </select>
             <select
               value={style}

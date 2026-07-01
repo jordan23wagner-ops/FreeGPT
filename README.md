@@ -55,11 +55,10 @@ No Docker. No database server. No monthly bills.
 
 | Dropdown | Ollama Cloud | NIM Fallback | Vision |
 |---|---|---|:---:|
-| Auto (default) | code → Qwen3-Coder, general → GPT-OSS, vision/image → Gemma | per-model | Yes |
+| Auto (default) | general → GPT-OSS, vision/image → Gemma | per-model | Yes |
 | MiniMax M3 | `minimax-m3` | `minimaxai/minimax-m3` | Yes |
 | Gemma 4 | `gemma4:31b` | `meta/llama-3.3-70b-instruct` | Yes |
 | GPT-OSS 120B | `gpt-oss:120b` | `meta/llama-3.3-70b-instruct` | No |
-| Qwen3 Coder | `qwen3-coder:480b` | `meta/llama-3.3-70b-instruct` | No |
 
 ## Document Export
 
