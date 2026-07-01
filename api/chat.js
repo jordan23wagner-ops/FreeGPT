@@ -12,6 +12,11 @@
 // model decides to call it (e.g. "draw a garden"), we run the prompt through NVIDIA
 // NIM's FLUX.1-dev endpoint and stream the result as an {"image":...} event.
 //
+// Web search has three modes (`webSearch` in the request body): 'off' (never), 'on'
+// (always search before answering — the old manual toggle), and 'auto' (smart routing:
+// the model gets a `web_search` tool and decides for itself whether the question needs
+// current/unfamiliar info, same pattern as image generation).
+//
 // Fallback caveat: once we've flushed the first delta the HTTP response is committed,
 // so provider fallback is only possible BEFORE the first token. The wroteAny flag
 // reflects this.
@@ -132,16 +137,23 @@ export default async function handler(req, res) {
     return res.end()
   }
 
-  // Optional web search (Tavily): run BEFORE the model so we can inject current
-  // results as context. Skipped for image requests (no point searching "draw a cat").
+  // Normalize the three search modes. Booleans are accepted for backward-compat with
+  // older clients that only knew on/off.
+  const searchMode = webSearch === true ? 'on' : (webSearch === false || webSearch == null ? 'off' : webSearch)
+
+  // 'on': always search BEFORE the model so we can inject current results as context.
+  // Skipped for image requests (no point searching "draw a cat").
   let searchData = null
-  if (webSearch && TAVILY_KEY && newMessage && !wantsImage) {
+  if (searchMode === 'on' && TAVILY_KEY && newMessage && !wantsImage) {
     try {
       searchData = await runWebSearch(newMessage, TAVILY_KEY)
     } catch (err) {
       console.error('Web search failed:', err.message)
     }
   }
+
+  // 'auto': offer the model a web_search tool instead, so it decides for itself.
+  const offerSearchTool = searchMode === 'auto' && !!TAVILY_KEY && !!newMessage && !wantsImage
 
   // Build a normalized message list (text + optional image part).
   const history = (messages || []).map(m => ({ role: m.role, content: m.content }))
@@ -204,16 +216,22 @@ export default async function handler(req, res) {
 
   const errors = []
 
-  // Offer the image tool when any image provider is available.
+  // Offer the image tool when any image provider is available, and the search tool
+  // when in 'auto' mode. Both are Ollama-only (NIM never receives a tools list).
   const hasImageProvider = NVIDIA_NIM_KEY || HUGGINGFACE_KEY
-  const tools = hasImageProvider ? [IMAGE_TOOL] : undefined
+  const toolList = []
+  if (hasImageProvider) toolList.push(IMAGE_TOOL)
+  if (offerSearchTool) toolList.push(WEB_SEARCH_TOOL)
+  const tools = toolList.length ? toolList : undefined
 
   // 1) Try Ollama Cloud first (free path).
   if (OLLAMA_CLOUD_KEY) {
     try {
       const { toolCall } = await streamOllama(fullMessages, ids.ollama, OLLAMA_CLOUD_KEY, writeDelta, tools)
-      if (toolCall) {
+      if (toolCall && toolCall.function.name === 'generate_image') {
         await runImageTool(toolCall, newMessage, NVIDIA_NIM_KEY, HUGGINGFACE_KEY, res, writeDelta)
+      } else if (toolCall && toolCall.function.name === 'web_search') {
+        await runWebSearchTool(toolCall, newMessage, fullMessages, ids, OLLAMA_CLOUD_KEY, NVIDIA_NIM_KEY, TAVILY_KEY, writeDelta)
       }
       if (searchData) writeDelta(sourcesMarkdown(searchData))
       res.write(JSON.stringify({ done: true, provider: 'ollama', model: effectiveModel }) + '\n')
@@ -322,7 +340,7 @@ function buildSearchSystem(query, search) {
   return {
     role: 'system',
     content:
-      `Today's date is ${today}. The user enabled web search; current results are below. ` +
+      `Today's date is ${today}. Current web search results for this query are below. ` +
       `Answer using them, cite inline like [1], [2], and be concise. If the results don't ` +
       `cover the question, say so.\n\nQuery: ${query}\n\n` +
       (search.answer ? `Quick summary: ${search.answer}\n\n` : '') +
@@ -447,7 +465,7 @@ async function streamOllama(messages, model, apiKey, onDelta, tools) {
     const m = obj && obj.message
     if (m) {
       if (!toolCall && Array.isArray(m.tool_calls)) {
-        const tc = m.tool_calls.find(t => t.function && t.function.name === 'generate_image')
+        const tc = m.tool_calls.find(t => t.function && (t.function.name === 'generate_image' || t.function.name === 'web_search'))
         if (tc) toolCall = tc
       }
       if (m.content) { got = true; onDelta(m.content) }
@@ -476,6 +494,46 @@ const IMAGE_TOOL = {
       required: ['prompt']
     }
   }
+}
+
+// Tool schema advertised to the chat model in 'auto' search mode. Description leans on
+// the model's own judgment of its knowledge confidence, not keyword-matching.
+const WEB_SEARCH_TOOL = {
+  type: 'function',
+  function: {
+    name: 'web_search',
+    description:
+      'Search the live web. Call this when the question needs current or recent information ' +
+      '(news, prices, scores, releases, schedules, "latest"/"today"/"this year"), or when you ' +
+      "are not confident you know the answer accurately from training. Don't call it for " +
+      'things you already know well, general knowledge, or math/reasoning/writing tasks.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'A focused search query capturing exactly what needs to be looked up.' }
+      },
+      required: ['query']
+    }
+  }
+}
+
+// Runs when the model calls web_search in 'auto' mode. Announces the search (so the
+// user sees why there's a pause), fetches results, then re-asks the SAME model without
+// tools so it commits to a text answer grounded in them.
+async function runWebSearchTool(toolCall, fallbackPrompt, baseMessages, ids, ollamaKey, nimKey, tavilyKey, onDelta) {
+  let args = {}
+  try { args = JSON.parse(toolCall.function.arguments || '{}') } catch { /* use fallback */ }
+  const query = (args.query && String(args.query).trim()) || fallbackPrompt
+
+  onDelta(`🔎 Searching the web for "${query}"…\n\n`)
+  const search = await runWebSearch(query, tavilyKey)
+  const messages = [...baseMessages, buildSearchSystem(query, search)]
+
+  if (ollamaKey) await streamOllama(messages, ids.ollama, ollamaKey, onDelta, undefined)
+  else if (nimKey) await streamNim(messages, ids.nim, nimKey, onDelta)
+  else throw new Error('no provider available for follow-up answer')
+
+  onDelta(sourcesMarkdown(search))
 }
 
 // Run a fetch with a hard deadline so a slow/hanging provider can't consume the whole

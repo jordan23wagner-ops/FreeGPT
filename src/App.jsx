@@ -70,7 +70,14 @@ export default function App() {
   const MAX_IMAGES = 4
   const [error, setError] = useState(null)
   const [lastAttempt, setLastAttempt] = useState(null)
-  const [webSearch, setWebSearch] = useState(() => localStorage.getItem('webSearch') === 'true')
+  // 'off' never searches, 'on' always searches first, 'auto' hands the model a
+  // web_search tool and lets it decide (smart routing, same idea as the model picker).
+  const [webSearch, setWebSearch] = useState(() => {
+    const stored = localStorage.getItem('webSearch')
+    if (stored === 'true') return 'on'
+    if (stored === 'false') return 'off'
+    return stored === 'on' || stored === 'off' || stored === 'auto' ? stored : 'auto'
+  })
   const [listening, setListening] = useState(false)
   const [doc, setDoc] = useState(null)          // { name, text, chars, truncated }
   const [docLoading, setDocLoading] = useState(false)
@@ -295,7 +302,7 @@ export default function App() {
     const userMessage = { id: Date.now(), role: 'user', content: text }
     const history = messages
     setMessages((prev) => [...prev, userMessage])
-    if (!webSearch && !looksLikeImageRequest(text)) {
+    if (webSearch === 'off' && !looksLikeImageRequest(text)) {
       const cached = getCached(cacheKey(model, history, text))
       if (cached) {
         setMessages((prev) => [...prev, { id: Date.now() + 1, role: 'assistant', content: cached, cached: true }])
@@ -673,7 +680,7 @@ export default function App() {
         setUsage(bumpUsage({ chat: 1, image: producedImage ? 1 : 0 }))
         // Cache plain text answers so identical prompts return instantly next time.
         // Never cache web-search answers — they're time-sensitive.
-        if (!producedImage && !(payload.images && payload.images.length) && !webSearch && streamedText.trim()) {
+        if (!producedImage && !(payload.images && payload.images.length) && webSearch === 'off' && streamedText.trim()) {
           setCached(cacheKey(model, history, payload.text), streamedText)
         }
       }
@@ -811,7 +818,7 @@ export default function App() {
     }
 
     // Cache hit: serve an identical text-only, non-image, non-doc prompt instantly.
-    if (!images.length && !doc && !webSearch && !looksLikeImageRequest(text)) {
+    if (!images.length && !doc && webSearch === 'off' && !looksLikeImageRequest(text)) {
       const cached = getCached(cacheKey(model, history, text))
       if (cached) {
         setMessages((prev) => [
@@ -1317,19 +1324,25 @@ export default function App() {
               )}
             </div>
           )}
-          {/* Web search toggle */}
+          {/* Web search mode: cycles off -> auto -> on -> off */}
           <div className="mb-2 flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setWebSearch((v) => !v)}
+              onClick={() => setWebSearch((v) => (v === 'off' ? 'auto' : v === 'auto' ? 'on' : 'off'))}
               className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${
-                webSearch
-                  ? 'bg-[var(--accent)] text-[var(--accent-text)] border-[var(--accent)]'
-                  : 'bg-[var(--surface-2)] text-[var(--muted)] border-[var(--border)]'
+                webSearch === 'off'
+                  ? 'bg-[var(--surface-2)] text-[var(--muted)] border-[var(--border)]'
+                  : 'bg-[var(--accent)] text-[var(--accent-text)] border-[var(--accent)]'
               }`}
-              title="Search the web for current information"
+              title={
+                webSearch === 'auto'
+                  ? 'Smart routing: the model searches the web only when it needs to'
+                  : webSearch === 'on'
+                  ? 'Always search the web before answering'
+                  : 'Never search the web'
+              }
             >
-              <Globe size={13} /> Web search {webSearch ? 'on' : 'off'}
+              <Globe size={13} /> Web search: {webSearch === 'auto' ? 'Auto' : webSearch === 'on' ? 'Always' : 'Off'}
             </button>
           </div>
           <form onSubmit={handleSubmit} className="flex gap-1.5">
