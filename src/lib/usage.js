@@ -26,6 +26,19 @@ export function overMessageLimit(usage, isPro = false) {
   return (usage?.chat || 0) >= dailyMessageLimit(isPro)
 }
 
+// ---- Context window (rough estimate) ----
+// All current models run with roughly a 128k-token context window. There's no real
+// tokenizer on the client, so we estimate tokens as chars/4 (a standard rough
+// heuristic) — good enough to warn a user before a very long chat degrades quality.
+export const CONTEXT_WINDOW_TOKENS = 128000
+
+// Fraction (0-1) of the context window the current conversation is estimated to use.
+export function contextUsageRatio(messages = [], extraChars = 0) {
+  const chars = messages.reduce((sum, m) => sum + (m.content ? m.content.length : 0), 0) + extraChars
+  const tokens = Math.ceil(chars / 4)
+  return Math.min(1, tokens / CONTEXT_WINDOW_TOKENS)
+}
+
 function today() {
   return new Date().toISOString().slice(0, 10)
 }

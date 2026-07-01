@@ -301,8 +301,6 @@ function isEditRequest(text) {
 // and whether code is included. 'default' adds nothing.
 const STYLE_PROMPTS = {
   quick: 'Answer as briefly as possible — at most 2-3 sentences. Skip preamble and do not include code unless the user explicitly asks for it.',
-  info: 'Explain clearly in prose. Do NOT include code blocks or code examples unless the user explicitly requests code. Focus on concepts and information.',
-  code: 'When relevant, include practical, well-formatted code examples with short explanations.',
 }
 
 // ---- Web search (Tavily) ----

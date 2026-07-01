@@ -8,7 +8,7 @@ import {
   newConversation, titleFromMessages,
 } from './lib/conversations'
 import { cacheKey, getCached, setCached, looksLikeImageRequest } from './lib/cache'
-import { loadUsage, bumpUsage, IMAGE_DAILY_SOFT_LIMIT, overMessageLimit, dailyMessageLimit } from './lib/usage'
+import { loadUsage, bumpUsage, IMAGE_DAILY_SOFT_LIMIT, overMessageLimit, dailyMessageLimit, contextUsageRatio } from './lib/usage'
 import { exportWord, exportPdf, exportReplyWord, exportReplyPdf } from './lib/exportChat'
 import { Download, Globe, Mic, FileUp, Volume2, Square, Loader2, Copy, Check, RefreshCw, Pencil, Search } from 'lucide-react'
 import renderMarkdown from './lib/renderMarkdown'
@@ -51,7 +51,10 @@ export default function App() {
   const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
   const [model, setModel] = useState(() => localStorage.getItem('model') || 'auto')
-  const [style, setStyle] = useState(() => localStorage.getItem('style') || 'default')
+  const [style, setStyle] = useState(() => {
+    const stored = localStorage.getItem('style')
+    return stored === 'default' || stored === 'quick' ? stored : 'default'
+  })
   const [tab, setTab] = useState('chat')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [usage, setUsage] = useState(loadUsage)
@@ -907,6 +910,8 @@ export default function App() {
   }
 
   const imageLimitHit = usage.image >= IMAGE_DAILY_SOFT_LIMIT
+  const contextRatio = contextUsageRatio(messages, (doc?.text?.length || 0) + input.length)
+  const chatLimitHit = overMessageLimit(usage, isPro)
 
   // Phase 7 — read-only shared view takes over the whole app when ?s=<id> is present.
   if (shareId) {
@@ -1072,14 +1077,9 @@ export default function App() {
             >
               <option value="default">Balanced</option>
               <option value="quick">Quick answer</option>
-              <option value="info">Info only (no code)</option>
-              <option value="code">Code suggestions</option>
             </select>
-            <span
-              className={`ml-auto text-xs ${imageLimitHit ? 'text-red-500 font-medium' : 'text-[var(--muted)]'}`}
-              title={`Conversations in your sidebar · images generated today (soft-limit ${IMAGE_DAILY_SOFT_LIMIT}/day to avoid throttling).`}
-            >
-              {conversations.length} {conversations.length === 1 ? 'chat' : 'chats'} · {usage.image} imgs today{imageLimitHit ? ' ⚠' : ''}
+            <span className="ml-auto text-xs text-[var(--muted)]" title="Conversations in your sidebar">
+              {conversations.length} {conversations.length === 1 ? 'chat' : 'chats'}
             </span>
           </div>
         </div>
@@ -1324,6 +1324,41 @@ export default function App() {
               )}
             </div>
           )}
+          {/* Plan / context / usage status bar */}
+          <div className="mb-2 flex items-center gap-3 flex-wrap text-xs text-[var(--muted)]">
+            <span
+              className={`px-1.5 py-0.5 rounded font-medium ${
+                isPro ? 'bg-[var(--accent)] text-[var(--accent-text)]' : 'bg-[var(--surface-2)]'
+              }`}
+            >
+              {isPro ? 'Pro' : 'Free'}
+            </span>
+            <span
+              className="flex items-center gap-1.5"
+              title="Rough estimate of how full the model's context window is for this chat."
+            >
+              Context
+              <span className="w-16 h-1.5 rounded-full bg-[var(--surface-2)] overflow-hidden inline-block">
+                <span
+                  className="block h-full bg-[var(--accent)]"
+                  style={{ width: `${Math.round(contextRatio * 100)}%` }}
+                />
+              </span>
+              {Math.round(contextRatio * 100)}%
+            </span>
+            <span
+              className={chatLimitHit ? 'text-red-500 font-medium' : ''}
+              title="Messages sent today vs. your plan's daily limit"
+            >
+              Chat: {usage.chat}/{dailyMessageLimit(isPro)}
+            </span>
+            <span
+              className={imageLimitHit ? 'text-red-500 font-medium' : ''}
+              title={`Images generated today (soft-limit ${IMAGE_DAILY_SOFT_LIMIT}/day to avoid throttling)`}
+            >
+              Images: {usage.image}/{IMAGE_DAILY_SOFT_LIMIT}
+            </span>
+          </div>
           {/* Web search mode: cycles off -> auto -> on -> off */}
           <div className="mb-2 flex items-center gap-2">
             <button
