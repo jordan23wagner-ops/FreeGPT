@@ -21,6 +21,37 @@
 // so provider fallback is only possible BEFORE the first token. The wroteAny flag
 // reflects this.
 
+// gpt-oss was trained on OpenAI's Harmony format, which has a built-in browser tool that
+// cites sources like "【2†L1-L4】". Our web_search tool doesn't use that schema, but the
+// model sometimes emits the citation habit anyway. Strip it from the stream so users see
+// our own "[1]"-style citations instead of a leaked, meaningless training-format artifact.
+// Chunk-boundary safe: holds back an unresolved "【" until either its "】" arrives (then
+// the whole span is checked against the pattern) or the stream ends (then it's flushed
+// as-is, since dropping real content is worse than an occasional stray bracket).
+const CITATION_ARTIFACT_RE = /【[^【】]*†[^【】]*】/g
+function stripCitationArtifacts(rawWrite) {
+  let pending = ''
+  const write = (text) => {
+    if (!text) return
+    pending += text
+    let emit = pending
+    const lastOpen = emit.lastIndexOf('【')
+    if (lastOpen !== -1 && !emit.slice(lastOpen).includes('】')) {
+      pending = emit.slice(lastOpen)
+      emit = emit.slice(0, lastOpen)
+    } else {
+      pending = ''
+    }
+    emit = emit.replace(CITATION_ARTIFACT_RE, '')
+    if (emit) rawWrite(emit)
+  }
+  write.flush = () => {
+    if (pending) rawWrite(pending)
+    pending = ''
+  }
+  return write
+}
+
 export default async function handler(req, res) {
   // CORS: allow the Job-Assistant browser extension (and any client) to call this free
   // chat backend cross-origin. The endpoint is already unauthenticated and public to the
@@ -169,9 +200,25 @@ export default async function handler(req, res) {
         ]
       : newMessage
   }
-  // Prepend any context system messages: persona + memory first (highest priority),
-  // then style guidance, attached document, and web search.
+  // Prepend any context system messages: a baseline honesty/grounding rule first (applies
+  // regardless of persona), then persona + memory, then style guidance, attached document,
+  // and web search.
   const systemMsgs = []
+
+  // Baseline anti-hallucination instruction, always on. Cheap (no extra request) compared
+  // to a verification pass, and this is where most hallucination-reduction guides say to
+  // start: abstention beats a wrong-but-confident answer. Also seeds today's date so the
+  // model isn't reasoning from a stale "as of my training cutoff" assumption even outside
+  // web search.
+  const today = new Date().toISOString().slice(0, 10)
+  systemMsgs.push({
+    role: 'system',
+    content:
+      `Today's date is ${today}. Be direct and helpful, but don't fabricate: if you're not ` +
+      `confident about a specific fact (a date, statistic, name, quote, or citation), say so ` +
+      `plainly instead of guessing, and prefer admitting uncertainty over a made-up-sounding ` +
+      `answer. Never invent citations, links, or sources.`,
+  })
 
   // Custom instructions / "about you" — always applied when set.
   const personaBits = []
@@ -208,11 +255,11 @@ export default async function handler(req, res) {
 
   // Shared writer + a flag tracking whether any token has been flushed.
   const state = { wroteAny: false }
-  const writeDelta = (text) => {
+  const writeDelta = stripCitationArtifacts((text) => {
     if (!text) return
     state.wroteAny = true
     res.write(JSON.stringify({ delta: text }) + '\n')
-  }
+  })
 
   const errors = []
 
@@ -234,6 +281,7 @@ export default async function handler(req, res) {
         await runWebSearchTool(toolCall, newMessage, fullMessages, ids, OLLAMA_CLOUD_KEY, NVIDIA_NIM_KEY, TAVILY_KEY, writeDelta)
       }
       if (searchData) writeDelta(sourcesMarkdown(searchData))
+      writeDelta.flush()
       res.write(JSON.stringify({ done: true, provider: 'ollama', model: effectiveModel }) + '\n')
       return res.end()
     } catch (err) {
@@ -241,6 +289,7 @@ export default async function handler(req, res) {
       errors.push(`Ollama: ${err.message}`)
       // Only safe to fall through if we haven't sent any tokens yet.
       if (state.wroteAny) {
+        writeDelta.flush()
         res.write(JSON.stringify({ error: `Stream interrupted (Ollama): ${err.message}` }) + '\n')
         return res.end()
       }
@@ -253,12 +302,14 @@ export default async function handler(req, res) {
     try {
       await streamNim(fullMessages, ids.nim, NVIDIA_NIM_KEY, writeDelta)
       if (searchData) writeDelta(sourcesMarkdown(searchData))
+      writeDelta.flush()
       res.write(JSON.stringify({ done: true, provider: 'nim', model: effectiveModel }) + '\n')
       return res.end()
     } catch (err) {
       console.error('NIM failed:', err.message)
       errors.push(`NIM: ${err.message}`)
       if (state.wroteAny) {
+        writeDelta.flush()
         res.write(JSON.stringify({ error: `Stream interrupted (NIM): ${err.message}` }) + '\n')
         return res.end()
       }
@@ -317,7 +368,10 @@ async function runWebSearch(query, key) {
       query: String(query).slice(0, 400),
       max_results: 5,
       include_answer: true,
-      search_depth: 'basic',
+      // 'advanced' does deeper content extraction than 'basic' — costs more Tavily
+      // credits per call, but richer/more accurate snippets are worth it now that
+      // search is the main lever we have against stale/wrong time-sensitive answers.
+      search_depth: 'advanced',
     }),
   })
   if (!response.ok) {
@@ -333,14 +387,18 @@ async function runWebSearch(query, key) {
 function buildSearchSystem(query, search) {
   const today = new Date().toISOString().slice(0, 10)
   const lines = search.results
-    .map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${String(r.content || '').slice(0, 500)}`)
+    .map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${String(r.content || '').slice(0, 800)}`)
     .join('\n\n')
   return {
     role: 'system',
     content:
-      `Today's date is ${today}. Current web search results for this query are below. ` +
-      `Answer using them, cite inline like [1], [2], and be concise. If the results don't ` +
-      `cover the question, say so.\n\nQuery: ${query}\n\n` +
+      `Today's date is ${today}. The web search results below are more current than your ` +
+      `training data — for anything time-sensitive (scores, prices, releases, schedules, ` +
+      `"latest"/"current"/"most recent" anything), trust these results over what you already ` +
+      `"know", even if it contradicts your training. Answer using them, cite inline like [1], ` +
+      `[2] (plain brackets — never a "【...】" style citation), and be concise. If the results ` +
+      `don't cover the question, or conflict with each other, say so plainly instead of ` +
+      `guessing.\n\nQuery: ${query}\n\n` +
       (search.answer ? `Quick summary: ${search.answer}\n\n` : '') +
       `Results:\n${lines}`,
   }
