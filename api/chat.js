@@ -22,13 +22,16 @@
 // reflects this.
 
 // gpt-oss was trained on OpenAI's Harmony format, which has a built-in browser tool that
-// cites sources like "【2†L1-L4】". Our web_search tool doesn't use that schema, but the
-// model sometimes emits the citation habit anyway. Strip it from the stream so users see
-// our own "[1]"-style citations instead of a leaked, meaningless training-format artifact.
+// cites sources like "【2†L1-L4】" or plain "【1】". Our web_search tool doesn't use that
+// schema, but the model sometimes emits the citation habit anyway. Strip it from the
+// stream so users see our own "[1]"-style citations instead of a leaked, meaningless
+// training-format artifact. Matches only brackets whose *entire* contents are citation-
+// shaped (digits/†/L/dashes/commas/whitespace) so real CJK 【】 bracket usage (which
+// always contains actual words/characters) is left untouched.
 // Chunk-boundary safe: holds back an unresolved "【" until either its "】" arrives (then
 // the whole span is checked against the pattern) or the stream ends (then it's flushed
 // as-is, since dropping real content is worse than an occasional stray bracket).
-const CITATION_ARTIFACT_RE = /【[^【】]*†[^【】]*】/g
+const CITATION_ARTIFACT_RE = /【[\dLl†,\-\s]+】/g
 function stripCitationArtifacts(rawWrite) {
   let pending = ''
   const write = (text) => {
@@ -404,10 +407,11 @@ function buildSearchSystem(query, search) {
       `"know", even if it contradicts your training. Some results may be older than others — ` +
       `check each one for its own date/event and, for "most recent" style questions, go with ` +
       `whichever result describes the most recent actual event, not just the first or most ` +
-      `confident-sounding one. Answer using them, cite inline like [1], [2] (plain brackets — ` +
-      `never a "【...】" style citation), and be concise. If the results don't cover the ` +
-      `question, or genuinely conflict on which is more recent, say so plainly instead of ` +
-      `guessing.\n\nQuery: ${query}\n\n` +
+      `confident-sounding one. Cite inline using ONLY ASCII square brackets like [1], [2] — ` +
+      `do not use fullwidth brackets (【1】) or any dagger/line-range reference (†, L1-L4); ` +
+      `that citation style is not supported here and will look broken to the user. Be ` +
+      `concise. If the results don't cover the question, or genuinely conflict on which is ` +
+      `more recent, say so plainly instead of guessing.\n\nQuery: ${query}\n\n` +
       (search.answer ? `Quick summary: ${search.answer}\n\n` : '') +
       `Results:\n${lines}`,
   }
