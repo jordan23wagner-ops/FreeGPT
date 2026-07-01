@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react'
 import { MessageSquare, ExternalLink, ImageIcon, FileUp } from 'lucide-react'
-import renderMarkdown from './lib/renderMarkdown'
+import renderMarkdown, { isSafeUrl } from './lib/renderMarkdown'
 import { enhanceMessages } from './lib/enhanceMessages'
 
 // Display hostname for a source-card link (e.g. "wikipedia.org"), falling back to the
@@ -75,7 +75,7 @@ export default function SharedChat({ chat, loading, notFound }) {
                 )}
                 {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
                   <div className="flex gap-1.5 overflow-x-auto mt-2 pb-1 -mx-1 px-1">
-                    {msg.sources.map((s, i) => (
+                    {msg.sources.filter((s) => s && isSafeUrl(s.url)).map((s, i) => (
                       <a
                         key={i}
                         href={s.url}

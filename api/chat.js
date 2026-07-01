@@ -1,3 +1,6 @@
+import { createClient } from '@supabase/supabase-js'
+import { createHash } from 'crypto'
+
 // Wagner-GPT chat backend (streaming)
 // Strategy: try Ollama Cloud first (free), fall back to NVIDIA NIM (dev credits) on failure.
 // Image generation: NVIDIA NIM FLUX.1-dev primary, Hugging Face FLUX.1-schnell fallback.
@@ -5,8 +8,12 @@
 // newline-delimited JSON (NDJSON) stream to the client:
 //   {"delta":"token text"}\n   (zero or more)
 //   {"image":"<base64 jpeg>","mediaType":"image/jpeg","prompt":"..."}\n   (AI-generated image)
+//   {"sources":[{"title":..,"url":..}]}\n   (web search sources, before "done")
 //   {"done":true,"provider":"ollama"}\n   (terminal success)
 //   {"error":"message"}\n   (terminal failure, only if NOTHING streamed yet)
+//
+// A request rejected by the shared-quota gate (below) never reaches the NDJSON stream at
+// all — it's a plain 429 JSON response, same shape as the "no API keys configured" 500.
 //
 // Image generation is exposed to the chat model as a `generate_image` tool. When the
 // model decides to call it (e.g. "draw a garden"), we run the prompt through NVIDIA
@@ -55,6 +62,90 @@ function stripCitationArtifacts(rawWrite) {
   return write
 }
 
+// ---- Shared-quota protection ----
+// One Ollama Cloud key serves every visitor: GPU-time billed (not token-capped), ~1
+// concurrent request on the free tier, and — critically — no API to check remaining
+// quota (only the web dashboard and a 90%-usage email). A handful of heavy users can
+// exhaust the whole account for everyone, and message-count limits don't actually guard
+// against that (a one-word reply and a 3000-word essay cost wildly different GPU-seconds
+// but count identically). This tracks OUR OWN estimate of daily generation-time — wall-
+// clock seconds spent in the provider call — per identity and for the whole app, and
+// blocks new requests before they start once either ceiling is hit.
+//
+// These numbers are rough starting points, not calibrated to your real Ollama Cloud
+// plan (there's no API to calibrate against). Watch the Ollama dashboard / 90%-usage
+// email for the first few weeks and tune via these env vars — no redeploy needed.
+const ANON_DAILY_SECONDS_CAP = Number(process.env.ANON_DAILY_SECONDS_CAP) || 600      // 10 min/day, no account
+const FREE_DAILY_SECONDS_CAP = Number(process.env.FREE_DAILY_SECONDS_CAP) || 1800     // 30 min/day, signed in
+const PRO_DAILY_SECONDS_CAP = Number(process.env.PRO_DAILY_SECONDS_CAP) || 7200       // 2 hr/day, Pro
+const GLOBAL_DAILY_SECONDS_CAP = Number(process.env.GLOBAL_DAILY_SECONDS_CAP) || 21600 // 6 hr/day, whole app
+
+const SUPABASE_URL = 'https://boleszqdqphfxxwizyoo.supabase.co'
+// Not a secret-grade salt — this only keeps raw IPs out of the database at rest, it
+// doesn't need to resist a targeted attacker (IPs aren't secret to begin with).
+const IP_PEPPER = 'freegpt-usage-v1'
+
+function todayStr() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function hashIp(ip) {
+  return 'ip:' + createHash('sha256').update(IP_PEPPER + ip).digest('hex').slice(0, 32)
+}
+
+function clientIp(req) {
+  const fwd = req.headers['x-forwarded-for']
+  if (fwd) return String(fwd).split(',')[0].trim()
+  return req.socket?.remoteAddress || 'unknown'
+}
+
+// Resolves who's calling (for per-identity limits) and which cap applies. Falls back to
+// anonymous on any auth/DB hiccup — a quota-tracking outage should never be the reason
+// chat goes down entirely.
+async function resolveIdentity(req, supabaseAdmin) {
+  const token = (req.headers.authorization || '').replace(/^Bearer\s+/i, '')
+  if (token && supabaseAdmin) {
+    try {
+      const { data, error } = await supabaseAdmin.auth.getUser(token)
+      if (!error && data?.user) {
+        let isPro = false
+        try {
+          const { data: sub } = await supabaseAdmin
+            .from('subscriptions')
+            .select('plan, status')
+            .eq('user_id', data.user.id)
+            .maybeSingle()
+          isPro = !!sub && sub.plan === 'pro' && (sub.status === 'active' || sub.status === 'trialing')
+        } catch { /* treat as free on lookup failure */ }
+        return { identity: `user:${data.user.id}`, cap: isPro ? PRO_DAILY_SECONDS_CAP : FREE_DAILY_SECONDS_CAP }
+      }
+    } catch { /* fall through to anonymous */ }
+  }
+  return { identity: hashIp(clientIp(req)), cap: ANON_DAILY_SECONDS_CAP }
+}
+
+// Reads today's usage for this identity and the whole app. Returns zeros (i.e. never
+// blocks) if Supabase isn't configured or the query fails.
+async function readUsage(supabaseAdmin, identity) {
+  if (!supabaseAdmin) return { identitySeconds: 0, globalSeconds: 0 }
+  try {
+    const day = todayStr()
+    const [{ data: idRow }, { data: globalRow }] = await Promise.all([
+      supabaseAdmin.from('usage_ledger').select('seconds').eq('identity', identity).eq('day', day).maybeSingle(),
+      supabaseAdmin.from('global_usage').select('seconds').eq('day', day).maybeSingle(),
+    ])
+    return { identitySeconds: idRow?.seconds || 0, globalSeconds: globalRow?.seconds || 0 }
+  } catch {
+    return { identitySeconds: 0, globalSeconds: 0 }
+  }
+}
+
+async function recordUsage(supabaseAdmin, identity, seconds) {
+  if (!supabaseAdmin || !(seconds > 0)) return
+  try { await supabaseAdmin.rpc('record_usage', { p_identity: identity, p_seconds: seconds }) }
+  catch (err) { console.error('record_usage failed:', err.message) }
+}
+
 export default async function handler(req, res) {
   // CORS: allow the Job-Assistant browser extension (and any client) to call this free
   // chat backend cross-origin. The endpoint is already unauthenticated and public to the
@@ -64,7 +155,7 @@ export default async function handler(req, res) {
   if (origin) res.setHeader('Access-Control-Allow-Origin', origin)
   res.setHeader('Vary', 'Origin')
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS')
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type')
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization')
   if (req.method === 'OPTIONS') return res.status(204).end()
 
   if (req.method !== 'POST') {
@@ -85,6 +176,28 @@ export default async function handler(req, res) {
   if (!OLLAMA_CLOUD_KEY && !NVIDIA_NIM_KEY) {
     return res.status(500).json({ error: 'No API keys configured (need OLLAMA_CLOUD_KEY and/or NVIDIA_NIM_KEY).' })
   }
+
+  // Shared-quota gate — runs before any provider call, so a request that's going to be
+  // rejected never spends any of the shared Ollama/NIM budget. Inert (never blocks) until
+  // SUPABASE_SERVICE_ROLE_KEY is set and the usage_ledger/global_usage tables exist.
+  const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
+  const supabaseAdmin = SUPABASE_SERVICE_ROLE_KEY ? createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY) : null
+  const { identity, cap: identityCap } = await resolveIdentity(req, supabaseAdmin)
+  const { identitySeconds, globalSeconds } = await readUsage(supabaseAdmin, identity)
+
+  if (globalSeconds >= GLOBAL_DAILY_SECONDS_CAP) {
+    return res.status(429).json({
+      error: "FreeGPT is at capacity for today — this runs on one shared free AI account. It resets in a few hours, or upgrade to Pro for priority access.",
+    })
+  }
+  if (identitySeconds >= identityCap) {
+    return res.status(429).json({
+      error: identity.startsWith('user:')
+        ? "You've used your daily allowance on the free plan. It resets at midnight, or upgrade to Pro in Settings for more headroom."
+        : "You've used your daily allowance for chats without an account. Sign in for a higher daily limit, or try again after it resets.",
+    })
+  }
+  const genStart = Date.now()
 
   // Provider-specific model IDs for each dropdown choice.
   // Ollama Cloud tags must match exactly what `GET https://ollama.com/api/tags`
@@ -285,6 +398,7 @@ export default async function handler(req, res) {
       }
       if (searchData) emitSources(res, searchData)
       writeDelta.flush()
+      await recordUsage(supabaseAdmin, identity, (Date.now() - genStart) / 1000)
       res.write(JSON.stringify({ done: true, provider: 'ollama', model: effectiveModel }) + '\n')
       return res.end()
     } catch (err) {
@@ -293,6 +407,7 @@ export default async function handler(req, res) {
       // Only safe to fall through if we haven't sent any tokens yet.
       if (state.wroteAny) {
         writeDelta.flush()
+        await recordUsage(supabaseAdmin, identity, (Date.now() - genStart) / 1000)
         res.write(JSON.stringify({ error: `Stream interrupted (Ollama): ${err.message}` }) + '\n')
         return res.end()
       }
@@ -306,6 +421,7 @@ export default async function handler(req, res) {
       await streamNim(fullMessages, ids.nim, NVIDIA_NIM_KEY, writeDelta)
       if (searchData) emitSources(res, searchData)
       writeDelta.flush()
+      await recordUsage(supabaseAdmin, identity, (Date.now() - genStart) / 1000)
       res.write(JSON.stringify({ done: true, provider: 'nim', model: effectiveModel }) + '\n')
       return res.end()
     } catch (err) {
@@ -313,6 +429,7 @@ export default async function handler(req, res) {
       errors.push(`NIM: ${err.message}`)
       if (state.wroteAny) {
         writeDelta.flush()
+        await recordUsage(supabaseAdmin, identity, (Date.now() - genStart) / 1000)
         res.write(JSON.stringify({ error: `Stream interrupted (NIM): ${err.message}` }) + '\n')
         return res.end()
       }

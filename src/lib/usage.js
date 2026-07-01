@@ -1,5 +1,10 @@
 // Lightweight client-side usage tracking so we can warn before hitting free-tier
-// limits — NVIDIA's image credits are the real cap. Counts reset each calendar day.
+// limits. This is a UX nudge only, trivially bypassed (incognito, clearing storage) —
+// it is NOT what protects the shared Ollama key from abuse. Real enforcement is
+// server-side in api/chat.js (generation-time based, per-identity + a global daily
+// ceiling across all users), which this client-side number should stay roughly under
+// so a well-behaved user rarely sees the server-side rejection. Counts reset each
+// calendar day.
 
 const KEY = 'usageStats'
 

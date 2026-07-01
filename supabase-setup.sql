@@ -106,3 +106,52 @@ create table if not exists subscriptions (
 
 alter table subscriptions enable row level security;
 create policy "own_subscription_read" on subscriptions for select using (auth.uid() = user_id);
+
+-- ───────────────────────── Shared-quota usage tracking ─────────────────────────
+-- The chat backend runs on ONE shared Ollama Cloud key across every visitor (GPU-time
+-- billed, not request-count billed, with no API to check remaining quota — only a
+-- dashboard + a 90%-usage email). A handful of heavy users can exhaust the whole
+-- account for everyone. This tracks estimated generation-TIME (not message count —
+-- a one-word reply and a 3000-word essay cost wildly different GPU-seconds) per
+-- identity per day, plus a running whole-app total, so api/chat.js can refuse new
+-- requests once either a per-identity or the shared global daily budget is spent.
+--
+-- No client access at all (no policies = fully locked down under RLS) — only the
+-- server's service-role key touches these, via the record_usage() RPC below.
+create table if not exists usage_ledger (
+  identity text not null,
+  day date not null,
+  seconds numeric not null default 0,
+  updated_at bigint not null default 0,
+  primary key (identity, day)
+);
+alter table usage_ledger enable row level security;
+
+create table if not exists global_usage (
+  day date primary key,
+  seconds numeric not null default 0,
+  updated_at bigint not null default 0
+);
+alter table global_usage enable row level security;
+
+-- Atomically adds p_seconds to both today's per-identity row and today's global row.
+-- SECURITY DEFINER so it can write despite RLS locking the tables to zero client
+-- policies — only reachable via the service-role key from api/chat.js, never the anon key.
+create or replace function record_usage(p_identity text, p_seconds numeric)
+returns void
+language sql
+security definer
+set search_path = public
+as $$
+  insert into usage_ledger (identity, day, seconds, updated_at)
+  values (p_identity, current_date, p_seconds, extract(epoch from now()) * 1000)
+  on conflict (identity, day) do update
+    set seconds = usage_ledger.seconds + excluded.seconds,
+        updated_at = excluded.updated_at;
+
+  insert into global_usage (day, seconds, updated_at)
+  values (current_date, p_seconds, extract(epoch from now()) * 1000)
+  on conflict (day) do update
+    set seconds = global_usage.seconds + excluded.seconds,
+        updated_at = excluded.updated_at;
+$$;

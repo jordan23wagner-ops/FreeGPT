@@ -19,6 +19,13 @@ function esc(s) {
 // so this can't rely on the model "just not doing that."
 const SAFE_URL_RE = /^(https?:|mailto:|tel:|\/|#|\.\/|\.\.\/)/i
 
+// Exported so callers rendering a source's url as a real React href/img-src (the
+// citation source-card row, not this file's own HTML-string output) can apply the same
+// scheme check — defense in depth rather than relying solely on the server's own filter.
+export function isSafeUrl(url) {
+  return typeof url === 'string' && SAFE_URL_RE.test(url)
+}
+
 // Style for an inline citation badge — a small rounded pill, Perplexity-style, so a
 // citation reads as a distinct clickable chip rather than plain bracketed text.
 const CITATION_STYLE =

@@ -10,7 +10,7 @@ import {
 import { loadUsage, bumpUsage, IMAGE_DAILY_SOFT_LIMIT, overMessageLimit, dailyMessageLimit, contextUsageRatio } from './lib/usage'
 import { exportWord, exportPdf, exportReplyWord, exportReplyPdf } from './lib/exportChat'
 import { Download, Mic, FileUp, Volume2, Square, Loader2, Copy, Check, RefreshCw, Pencil, Search, Headphones } from 'lucide-react'
-import renderMarkdown from './lib/renderMarkdown'
+import renderMarkdown, { isSafeUrl } from './lib/renderMarkdown'
 import { parseDocument, isSupportedDocument } from './lib/parseDocument'
 import { THEMES, isDarkTheme } from './lib/themes'
 import { Palette } from 'lucide-react'
@@ -27,7 +27,7 @@ import { Share2 } from 'lucide-react'
 import SharedChat from './SharedChat'
 import { createShare, loadShare, shareUrl, shareIdFromUrl, listShares, deleteShare } from './lib/share'
 import { Settings, Brain, Trash, LogIn, LogOut, Mail, Crown } from 'lucide-react'
-import { hasSupabase } from './lib/supabase'
+import { supabase, hasSupabase } from './lib/supabase'
 import { initAuth, onAuthChange, signInWithEmail, signInWithGoogle, signOut } from './lib/auth'
 import { syncConversationsDown, syncConversationUp, syncDeleteConversation } from './lib/sync'
 import { startCheckout, openBillingPortal, fetchMySubscription, isProPlan } from './lib/billing'
@@ -106,6 +106,7 @@ export default function App() {
   const voiceModeActiveRef = useRef(false)            // hands-free voice mode on/off
   const voiceModeBusyRef = useRef(false)              // guards against overlapping rec.start() calls
   const voiceModeRecRef = useRef(null)
+  const voiceFailCountRef = useRef(0)                 // consecutive failed turns, resets on success
   const prevLoadingRef = useRef(false)                // detects the loading:true->false edge
 
   // Phase 7 — shareable links. If the app is opened with ?s=<id>, we render a read-only
@@ -403,9 +404,12 @@ export default function App() {
     rec.continuous = false
     let gotResult = false
     rec.onresult = (e) => {
-      gotResult = true
+      // Only mark this attempt "handled" once we have an actual transcript — a blank/
+      // low-confidence result must NOT suppress onend's retry below, or voice mode
+      // silently dies (looks like "Listening…" forever with a dead mic).
       const transcript = (e.results[0]?.[0]?.transcript || '').trim()
       if (!transcript) return
+      gotResult = true
       if (blockedByLimit()) { closeVoiceMode(); return }
       setVoiceState('thinking')
       sendText(transcript)
@@ -425,7 +429,15 @@ export default function App() {
     }
     voiceModeRecRef.current = rec
     setVoiceState('listening')
-    rec.start()
+    try {
+      rec.start()
+    } catch {
+      // Shouldn't normally throw (the busy-guard above prevents overlapping starts), but
+      // if it does, reset state so the loop doesn't wedge permanently.
+      voiceModeRecRef.current = null
+      voiceModeBusyRef.current = false
+      if (voiceModeActiveRef.current) setTimeout(voiceListen, 500)
+    }
   }
 
   // Reads a finished reply aloud, then loops back to listening — the "conversation" part
@@ -453,9 +465,11 @@ export default function App() {
 
   const startVoiceMode = () => {
     if (!speechSupported || !ttsSupported || loading) return
+    if (blockedByLimit()) return
     window.speechSynthesis.cancel()
     setSpeakingId(null)
     if (listening) recognitionRef.current?.stop()
+    voiceFailCountRef.current = 0
     voiceModeActiveRef.current = true
     setVoiceModeOpen(true)
     voiceListen()
@@ -463,11 +477,25 @@ export default function App() {
 
   // When a voice-mode turn finishes streaming, speak the reply; the speak->onend handler
   // loops back to listening, so this is the only place that needs to watch for completion.
+  // A failed turn (network drop, no provider available) produces no assistant message at
+  // all, so it used to fail completely silently — the user would just hear dead air with
+  // no idea anything broke. Now it announces the failure and retries, with a 3-strike
+  // circuit breaker so a genuinely dead connection can't loop forever.
   useEffect(() => {
     if (voiceModeOpen && prevLoadingRef.current && !loading) {
       const last = messages[messages.length - 1]
-      if (last && last.role === 'assistant' && last.content) speakVoiceMode(last.content)
-      else if (voiceModeActiveRef.current) voiceListen()
+      if (last && last.role === 'assistant' && last.content) {
+        voiceFailCountRef.current = 0
+        speakVoiceMode(last.content)
+      } else if (voiceModeActiveRef.current) {
+        voiceFailCountRef.current += 1
+        if (voiceFailCountRef.current >= 3) {
+          setError(error || "Voice mode can't reach the server right now — try again in a moment.")
+          closeVoiceMode()
+        } else {
+          speakVoiceMode(error || 'Sorry, something went wrong. Let\'s try that again.')
+        }
+      }
     }
     prevLoadingRef.current = loading
   }, [loading, voiceModeOpen]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -687,11 +715,22 @@ export default function App() {
     const controller = new AbortController()
     abortRef.current = controller
 
+    // Attach the Supabase access token when signed in so the backend's shared-quota gate
+    // can apply the (higher) signed-in/Pro daily cap instead of the anonymous IP-based one.
+    // Best-effort — a failed lookup just falls back to anonymous limits, never blocks chat.
+    const headers = { 'Content-Type': 'application/json' }
+    if (hasSupabase && signedIn) {
+      try {
+        const { data } = await supabase.auth.getSession()
+        if (data?.session?.access_token) headers.Authorization = `Bearer ${data.session.access_token}`
+      } catch { /* proceed without — server falls back to IP-based anonymous limits */ }
+    }
+
     try {
       const response = await fetch('/api/chat', {
         method: 'POST',
         signal: controller.signal,
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify({
           // Re-attach any document text from prior turns so follow-ups keep context.
           // Large (RAG) docs are NOT re-dumped here — that would defeat retrieval; their
@@ -1245,7 +1284,7 @@ export default function App() {
                     )}
                     {msg.role === 'assistant' && msg.sources && msg.sources.length > 0 && (
                       <div className="flex gap-1.5 overflow-x-auto mt-2 pb-1 -mx-1 px-1">
-                        {msg.sources.map((s, i) => (
+                        {msg.sources.filter((s) => s && isSafeUrl(s.url)).map((s, i) => (
                           <a
                             key={i}
                             href={s.url}
