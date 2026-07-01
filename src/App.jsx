@@ -27,10 +27,11 @@ import { RAG_THRESHOLD, docId, buildIndex, retrieveChunks } from './lib/rag'
 import { Share2 } from 'lucide-react'
 import SharedChat from './SharedChat'
 import { createShare, loadShare, shareUrl, shareIdFromUrl, listShares, deleteShare } from './lib/share'
-import { Settings, Brain, Trash, LogIn, LogOut, Mail } from 'lucide-react'
+import { Settings, Brain, Trash, LogIn, LogOut, Mail, Crown } from 'lucide-react'
 import { hasSupabase } from './lib/supabase'
 import { initAuth, onAuthChange, signInWithEmail, signInWithGoogle, signOut } from './lib/auth'
 import { syncConversationsDown, syncConversationUp, syncDeleteConversation } from './lib/sync'
+import { startCheckout, openBillingPortal, fetchMySubscription, isProPlan } from './lib/billing'
 
 // Inset so the header/input clear the phone's status bar (time/battery) and home
 // indicator. Harmless 0 on desktop; real values on notched phones (viewport-fit=cover).
@@ -108,14 +109,15 @@ export default function App() {
   // cloud sync + memory + shares activate, scoped to this user by RLS.
   const [authUser, setAuthUser] = useState(null)
   const signedIn = !!authUser
-  // Phase 2 (Stripe) will set this from the user's subscription row. Until then
-  // everyone is on the free tier and the daily message cap applies.
-  const isPro = false
+  // The signed-in user's subscription row, synced by the Stripe webhook. Null while
+  // signed out or not yet loaded — treated as free tier either way.
+  const [subscription, setSubscription] = useState(null)
+  const isPro = isProPlan(subscription)
   // Guard a send against the free-tier daily cap. Returns true if blocked (and shows
   // an upgrade nudge). Pro users are never blocked here.
   const blockedByLimit = () => {
     if (!isPro && overMessageLimit(usage, isPro)) {
-      setError(`You've reached the free daily limit of ${dailyMessageLimit(false)} messages. It resets at midnight — or Pro (coming soon) lifts the cap.`)
+      setError(`You've reached the free daily limit of ${dailyMessageLimit(false)} messages. It resets at midnight — or upgrade to Pro in Settings for a higher limit.`)
       return true
     }
     return false
@@ -124,12 +126,46 @@ export default function App() {
   const [authEmail, setAuthEmail] = useState('')
   const [authSent, setAuthSent] = useState(false)     // magic-link sent confirmation
   const [authMsg, setAuthMsg] = useState(null)        // error / status text
+  const [billingBusy, setBillingBusy] = useState(false)
+  const [billingMsg, setBillingMsg] = useState(null)
+  const [checkoutNotice, setCheckoutNotice] = useState(null) // post-Stripe-redirect banner
 
   useEffect(() => {
     if (!hasSupabase) return
     initAuth().then(setAuthUser)
     return onAuthChange(setAuthUser)
   }, [])
+
+  useEffect(() => {
+    if (!hasSupabase || !signedIn) { setSubscription(null); return }
+    fetchMySubscription().then(setSubscription)
+  }, [signedIn])
+
+  // Land back from Stripe Checkout with ?checkout=success|cancel. The webhook usually
+  // beats the redirect back, but refetch once more after a short delay just in case,
+  // then strip the query param so a refresh doesn't re-trigger the banner.
+  useEffect(() => {
+    const status = new URLSearchParams(window.location.search).get('checkout')
+    if (!status) return
+    setCheckoutNotice(status)
+    if (status === 'success') setTimeout(() => { fetchMySubscription().then(setSubscription) }, 2000)
+    const url = new URL(window.location.href)
+    url.searchParams.delete('checkout')
+    window.history.replaceState({}, '', url)
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const doUpgrade = async () => {
+    setBillingMsg(null)
+    setBillingBusy(true)
+    try { await startCheckout() }
+    catch (e) { setBillingMsg(e.message); setBillingBusy(false) }
+  }
+  const doManageBilling = async () => {
+    setBillingMsg(null)
+    setBillingBusy(true)
+    try { await openBillingPortal() }
+    catch (e) { setBillingMsg(e.message); setBillingBusy(false) }
+  }
 
   const sendMagicLink = async () => {
     setAuthMsg(null)
@@ -986,6 +1022,25 @@ export default function App() {
           </div>
         </div>
 
+        {checkoutNotice && (
+          <div
+            className={`px-4 py-2 text-sm flex items-center justify-between gap-3 ${
+              checkoutNotice === 'success'
+                ? 'bg-green-100 text-green-800 dark:bg-green-950/40 dark:text-green-200'
+                : 'bg-[var(--surface-2)] text-[var(--muted)]'
+            }`}
+          >
+            <span>
+              {checkoutNotice === 'success'
+                ? "You're upgraded to Pro! It may take a few seconds to reflect below."
+                : 'Checkout canceled — no charge was made.'}
+            </span>
+            <button onClick={() => setCheckoutNotice(null)} className="shrink-0 opacity-70 hover:opacity-100" aria-label="Dismiss">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+
         {tab === 'chat' && (
         <>
         {/* Model Selector + usage */}
@@ -1501,6 +1556,42 @@ export default function App() {
                     className="w-full mt-1 px-3 py-2 rounded-lg text-sm border bg-[var(--input-bg)] border-[var(--border)] text-[var(--text)] placeholder:text-[var(--muted)] resize-none"
                   />
                 </div>
+
+                {signedIn && (
+                  <div className="border-t border-[var(--border)] pt-3">
+                    <span className="text-sm font-medium flex items-center gap-1.5">
+                      <Crown size={15} className={isPro ? 'text-amber-500' : ''} /> Plan
+                    </span>
+                    {isPro ? (
+                      <>
+                        <p className="text-xs text-[var(--muted)] mt-1">
+                          Pro — {dailyMessageLimit(true)} messages/day.
+                        </p>
+                        <button
+                          onClick={doManageBilling}
+                          disabled={billingBusy}
+                          className="mt-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--surface-2)] text-[var(--text)] hover:opacity-80 disabled:opacity-50"
+                        >
+                          {billingBusy ? 'Opening…' : 'Manage billing'}
+                        </button>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-xs text-[var(--muted)] mt-1">
+                          Free — {dailyMessageLimit(false)} messages/day. Upgrade for {dailyMessageLimit(true)}/day.
+                        </p>
+                        <button
+                          onClick={doUpgrade}
+                          disabled={billingBusy}
+                          className="mt-2 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)] disabled:opacity-50"
+                        >
+                          {billingBusy ? 'Redirecting…' : 'Upgrade to Pro — $5/mo'}
+                        </button>
+                      </>
+                    )}
+                    {billingMsg && <p className="text-xs text-red-500 mt-2">{billingMsg}</p>}
+                  </div>
+                )}
 
                 <div className="border-t border-[var(--border)] pt-3">
                   <div className="flex items-center justify-between">
