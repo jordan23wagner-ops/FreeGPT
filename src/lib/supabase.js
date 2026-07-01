@@ -11,8 +11,8 @@
 
 import { createClient } from '@supabase/supabase-js'
 
-const url = 'https://YOUR_PROJECT_REF.supabase.co'
-const key = 'YOUR_SUPABASE_ANON_KEY'
+const url = 'https://boleszqdqphfxxwizyoo.supabase.co'
+const key = 'sb_publishable_i_JpTN1VMvgByGCL3KPNQQ_7PpYGzhb'
 
 // Treat the placeholders as "not configured" so the app degrades gracefully.
 const configured = !url.includes('YOUR_PROJECT_REF') && !key.includes('YOUR_SUPABASE_ANON_KEY')
