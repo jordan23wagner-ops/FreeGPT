@@ -34,7 +34,7 @@ export default function SharedChat({ chat, loading, notFound }) {
           href={window.location.pathname}
           className="flex items-center gap-1.5 shrink-0 px-3 py-1.5 rounded-lg text-sm font-medium bg-[var(--accent)] text-[var(--accent-text)] hover:bg-[var(--accent-hover)]"
         >
-          <ExternalLink size={15} /> Open FreeGPT
+          <ExternalLink size={15} /> Open Vessa
         </a>
       </div>
 
@@ -103,7 +103,7 @@ export default function SharedChat({ chat, loading, notFound }) {
 
       {/* Footer */}
       <div className="bg-[var(--surface)] border-[var(--border)] border-t px-4 py-2 text-center text-xs text-[var(--muted)]">
-        Read-only snapshot · FreeGPT
+        Read-only snapshot · Vessa
       </div>
     </div>
   )

@@ -1,4 +1,4 @@
-// Supabase client for FreeGPT (public, multi-user).
+// Supabase client for Vessa (public, multi-user).
 //
 // The anon/publishable key is meant to ship in frontend code (like Stripe's
 // publishable key). Security comes from Row Level Security policies + Supabase

@@ -1,4 +1,4 @@
--- FreeGPT — full Supabase schema (multi-user, RLS-scoped).
+-- Vessa — full Supabase schema (multi-user, RLS-scoped).
 -- Run once in: Supabase Dashboard -> SQL Editor -> New query -> paste -> Run.
 --
 -- Every table is owned by auth.uid(): the user_id column DEFAULTS to the caller's

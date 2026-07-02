@@ -131,7 +131,7 @@ export default function App() {
   // an upgrade nudge). Pro users are never blocked here.
   const blockedByLimit = () => {
     if (!isPro && overMessageLimit(usage, isPro)) {
-      setError(`You've sent a lot of messages today (${dailyMessageLimit(false)}+) — thanks for using FreeGPT so much! It resets at midnight, or upgrade to Pro in Settings for more headroom.`)
+      setError(`You've sent a lot of messages today (${dailyMessageLimit(false)}+) — thanks for using Vessa so much! It resets at midnight, or upgrade to Pro in Settings for more headroom.`)
       return true
     }
     return false
@@ -1064,7 +1064,7 @@ export default function App() {
             )}
             <div className="flex items-center gap-1.5 px-1 font-semibold text-[var(--text)] select-none">
               <MessageSquare size={18} className="text-[var(--accent)]" />
-              <span>FreeGPT</span>
+              <span>Vessa</span>
             </div>
           </div>
           <div className="flex items-center gap-1.5">
@@ -1889,7 +1889,7 @@ export default function App() {
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between mb-1">
-                <h2 className="text-lg font-semibold text-[var(--text)]">Sign in to FreeGPT</h2>
+                <h2 className="text-lg font-semibold text-[var(--text)]">Sign in to Vessa</h2>
                 <button onClick={() => setAuthOpen(false)} className="p-1 rounded-lg text-[var(--muted)] hover:bg-[var(--surface-2)]" aria-label="Close">
                   <X size={18} />
                 </button>
