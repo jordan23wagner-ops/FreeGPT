@@ -1,4 +1,4 @@
-// Auth layer for Vessa — thin wrapper over Supabase Auth.
+// Auth layer for Chatwillow — thin wrapper over Supabase Auth.
 //
 // Signed out  → app works on localStorage only (private to the browser).
 // Signed in   → cloud sync/memory/shares activate, scoped to auth.uid() by RLS.

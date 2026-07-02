@@ -193,7 +193,7 @@ export default async function handler(req, res) {
 
   if (globalSeconds >= GLOBAL_DAILY_SECONDS_CAP) {
     return res.status(429).json({
-      error: "Vessa is at capacity for today — this runs on one shared free AI account. It resets in a few hours, or upgrade to Pro for priority access.",
+      error: "Chatwillow is at capacity for today — this runs on one shared free AI account. It resets in a few hours, or upgrade to Pro for priority access.",
     })
   }
   if (identitySeconds >= identityCap) {

@@ -1,4 +1,4 @@
-// Vessa service worker.
+// Chatwillow service worker.
 //
 // Strategy (deliberately conservative — a chat app needs the network anyway):
 //   - Navigations (the HTML document): NETWORK-FIRST. This guarantees a new deploy
@@ -12,7 +12,7 @@
 // returned index.html in their place — so the browser got HTML where it expected JS and
 // rendered a blank page. Bumping CACHE_NAME below purges that poisoned cache on activate.
 
-const CACHE_NAME = 'vessa-v1'
+const CACHE_NAME = 'chatwillow-v1'
 
 self.addEventListener('install', () => {
   // Take over as soon as possible so fixes reach users without a manual unregister.
