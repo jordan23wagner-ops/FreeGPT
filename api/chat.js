@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 import { createHash } from 'crypto'
 
-// Wagner-GPT chat backend (streaming)
+// Chatwillow chat backend (streaming)
 // Strategy: try Ollama Cloud first (free), then Cerebras and Groq (both host the same
 // gpt-oss-120b model on separate free-tier quota pools — no quality drop, just different
 // infra), falling back to NVIDIA NIM (dev credits, weaker model) last.
@@ -828,9 +828,9 @@ async function describeForEdit(imageBase64List, instruction, ollamaKey) {
       content:
         'You write prompts for a text-to-image model. Look at the attached image(s) and the ' +
         'user request, then output ONE vivid prompt (max 80 words) describing the SAME ' +
-        'scene transformed as requested — keep the layout, plants, structures, and setting ' +
+        'scene transformed as requested — keep the layout, subjects, structures, and setting ' +
         'recognizable. If several images are given, combine them into one coherent scene. ' +
-        'Describe only the garden, plants, and landscape — do NOT mention people, faces, ' +
+        'Describe the scene, objects, and setting faithfully — but do NOT mention people, faces, ' +
         'children, or bodies (that can trip content filters). ' +
         'Output only the prompt text, no preamble or quotes.',
     },
