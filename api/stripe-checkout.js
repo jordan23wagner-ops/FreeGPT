@@ -19,7 +19,17 @@ export default async function handler(req, res) {
   if (userErr || !userData?.user) return res.status(401).json({ error: 'Sign in required.' })
   const user = userData.user
 
-  const origin = req.headers.origin || `https://${req.headers.host}`
+  // product 'alicia' = Job-Assistant (Alicia) Pro, a separate Stripe price. Checkout
+  // opened from the extension has a chrome-extension:// origin, which Stripe rejects
+  // as a redirect target — send those users back to the Chatwillow site instead.
+  const product = req.body?.product === 'alicia' ? 'alicia' : 'chatwillow'
+  const priceId = product === 'alicia'
+    ? process.env.STRIPE_ALICIA_PRICE_ID
+    : process.env.STRIPE_PRICE_ID
+  if (!priceId) return res.status(500).json({ error: 'Billing not configured for this product.' })
+
+  const rawOrigin = req.headers.origin || `https://${req.headers.host}`
+  const origin = /^https?:\/\//i.test(rawOrigin) ? rawOrigin : 'https://chatwillow.com'
 
   try {
     // Reuse the Stripe customer we already created for this user, if any.
@@ -45,12 +55,12 @@ export default async function handler(req, res) {
       mode: 'subscription',
       customer: customerId,
       client_reference_id: user.id,
-      line_items: [{ price: process.env.STRIPE_PRICE_ID, quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       // Stamped onto the Subscription object too, so every subscription.* webhook
-      // event carries the Supabase user id without a customer-id lookup.
-      subscription_data: { metadata: { supabase_user_id: user.id } },
+      // event carries the Supabase user id and product without a customer-id lookup.
+      subscription_data: { metadata: { supabase_user_id: user.id, product } },
       allow_promotion_codes: true,
-      success_url: `${origin}/?checkout=success`,
+      success_url: `${origin}/?checkout=success&product=${product}`,
       cancel_url: `${origin}/?checkout=cancel`,
     })
 

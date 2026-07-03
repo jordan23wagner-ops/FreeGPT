@@ -117,7 +117,9 @@ async function resolveIdentity(req, supabaseAdmin) {
             .select('plan, status')
             .eq('user_id', data.user.id)
             .maybeSingle()
-          isPro = !!sub && sub.plan === 'pro' && (sub.status === 'active' || sub.status === 'trialing')
+          // 'pro' = Chatwillow Pro, 'alicia_pro' = Job-Assistant (Alicia) Pro. Both draw
+          // from the same shared GPU budget, so both get the Pro daily cap here.
+          isPro = !!sub && (sub.plan === 'pro' || sub.plan === 'alicia_pro') && (sub.status === 'active' || sub.status === 'trialing')
         } catch { /* treat as free on lookup failure */ }
         return { identity: `user:${data.user.id}`, cap: isPro ? PRO_DAILY_SECONDS_CAP : FREE_DAILY_SECONDS_CAP }
       }

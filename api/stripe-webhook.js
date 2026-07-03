@@ -35,7 +35,10 @@ async function upsertFromSubscription(sub) {
     console.error('Webhook: no Supabase user for Stripe subscription', sub.id)
     return
   }
-  const plan = ['active', 'trialing'].includes(sub.status) ? 'pro' : 'free'
+  // Which product this subscription is for: 'alicia' (Job-Assistant Pro) writes plan
+  // 'alicia_pro'; anything else is Chatwillow Pro. The chat quota gate accepts both.
+  const activePlan = sub.metadata?.product === 'alicia' ? 'alicia_pro' : 'pro'
+  const plan = ['active', 'trialing'].includes(sub.status) ? activePlan : 'free'
   await supabaseAdmin.from('subscriptions').upsert(
     {
       user_id: userId,
