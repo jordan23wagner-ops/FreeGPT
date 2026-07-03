@@ -39,15 +39,20 @@ self.addEventListener('fetch', (event) => {
   if (url.origin !== self.location.origin) return
 
   // Page loads: network-first, fall back to the last good HTML when offline.
+  // Cache each page under its own URL — static pages like /tools/* must not
+  // overwrite the app shell stored at /index.html.
   if (req.mode === 'navigate') {
+    const cacheKey = url.pathname === '/' ? '/index.html' : req.url
     event.respondWith(
       fetch(req)
         .then((res) => {
           const copy = res.clone()
-          caches.open(CACHE_NAME).then((c) => c.put('/index.html', copy))
+          caches.open(CACHE_NAME).then((c) => c.put(cacheKey, copy))
           return res
         })
-        .catch(() => caches.match('/index.html'))
+        .catch(() =>
+          caches.match(cacheKey).then((cached) => cached || caches.match('/index.html'))
+        )
     )
     return
   }
