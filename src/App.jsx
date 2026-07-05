@@ -31,6 +31,7 @@ import { supabase, hasSupabase } from './lib/supabase'
 import { initAuth, onAuthChange, signInWithEmail, signInWithGoogle, signOut } from './lib/auth'
 import { syncConversationsDown, syncConversationUp, syncDeleteConversation } from './lib/sync'
 import { startCheckout, openBillingPortal, fetchMySubscription, isProPlan } from './lib/billing'
+import { Analytics } from '@vercel/analytics/react'
 
 // Inset so the header/input clear the phone's status bar (time/battery) and home
 // indicator. Harmless 0 on desktop; real values on notched phones (viewport-fit=cover).
@@ -1978,6 +1979,7 @@ export default function App() {
           </div>
         )}
       </div>
+      <Analytics />
     </div>
   )
 }
