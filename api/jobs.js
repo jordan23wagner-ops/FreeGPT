@@ -30,7 +30,10 @@ export default async function handler(req, res) {
     // wrong scope, or a name typo without leaking secrets.
     return res.status(500).json({
       error: 'Job search is not configured yet (set ADZUNA_APP_ID and ADZUNA_APP_KEY in the backend environment).',
-      have: { ADZUNA_APP_ID: !!APP_ID, ADZUNA_APP_KEY: !!APP_KEY }
+      have: { ADZUNA_APP_ID: !!APP_ID, ADZUNA_APP_KEY: !!APP_KEY },
+      // Diagnostic: env-var NAMES containing "adzuna" (names only — never values). Empty => the vars
+      // aren't on this project/scope; different names => a naming mismatch to fix.
+      adzunaVarsSeen: Object.keys(process.env).filter((k) => /adzuna/i.test(k))
     });
   }
 
